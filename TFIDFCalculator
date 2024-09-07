@@ -1,0 +1,155 @@
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
+
+public class TFIDFCalculator {
+
+    public static void main(String[] args) {
+        if (args.length != 2) {
+            System.out.println("Usage: java TFIDFCalculator <docs_file_path> <test_case_file_path>");
+            System.exit(1);
+        }
+
+        String docsFilePath = args[0];
+        String testCaseFilePath = args[1];
+
+        long startTime = System.currentTimeMillis();
+
+        try {
+            // 讀取文檔和處理
+            List<List<String>> docs = readAndProcessDocs(docsFilePath);
+
+            // 讀
+            List<String> terms;
+            List<Integer> docIndexes;
+            String[] testContent = new String(Files.readAllBytes(Paths.get(testCaseFilePath))).split("\n");
+            terms = Arrays.asList(testContent[0].split(" "));
+            docIndexes = Arrays.stream(testContent[1].split(" "))
+                    .map(Integer::parseInt)
+                    .collect(Collectors.toList());
+
+            // 算所有字的IDF值
+            ConcurrentHashMap<String, Double> idfMap = calculateIdf(docs);
+
+            // 算 TF-IDF
+            List<Double> results = new ArrayList<>();
+            for (int i = 0; i < terms.size(); i++) {
+                String term = terms.get(i);
+                int docIndex = docIndexes.get(i);
+                List<String> doc = docs.get(docIndex);
+                double tfidf = tfIdfCalculate(doc, docs, term, idfMap);
+                results.add(round(tfidf, 5));
+            }
+
+            // 寫入结果
+            writeResults(results);
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        long endTime = System.currentTimeMillis();
+        double duration = (endTime - startTime) / 1000.0; // 時間單位為秒
+        System.out.printf("Execution time: %.3f seconds%n", duration);
+    }
+
+    private static List<List<String>> readAndProcessDocs(String filePath) throws IOException {
+        List<List<String>> docs = new ArrayList<>();
+        BufferedReader reader = new BufferedReader(new FileReader(filePath));
+        String line;
+        List<String> currentDoc = new ArrayList<>();
+        int sentenceCount = 0;
+
+        while ((line = reader.readLine()) != null) {
+            String[] parts = line.split("\t", 2);
+            if (parts.length < 2) continue; 
+            String originalSentence = parts[1];
+            // 將所有非英文字元以空白代替，去除句尾的句號
+            String sentence = originalSentence.replaceAll("[^a-zA-Z]", " ").toLowerCase().replaceAll("\\s+", " ").trim();
+
+            currentDoc.addAll(Arrays.asList(sentence.split(" ")));
+            sentenceCount++;
+            if (sentenceCount == 5) {
+                docs.add(new ArrayList<>(currentDoc));
+                currentDoc.clear();
+                sentenceCount = 0;
+            }
+        }
+        
+        // 最後一個
+        if (!currentDoc.isEmpty()) {
+            docs.add(currentDoc);
+        }
+        reader.close();
+        return docs;
+    }
+
+    private static void writeResults(List<Double> results) throws IOException {
+        BufferedWriter writer = new BufferedWriter(new FileWriter("output.txt"));
+        for (int i = 0; i < results.size(); i++) {
+            writer.write(String.format("%.5f", results.get(i)));
+            if (i < results.size() - 1) {
+                writer.write(" ");
+            }
+        }
+        writer.close();
+    }
+
+    private static double tf(List<String> doc, String term) {
+        double count = 0;
+        for (String word : doc) {
+            if (word.equals(term)) {
+                count++;
+            }
+        }
+        return count / doc.size();
+    }
+
+    private static ConcurrentHashMap<String, Double> calculateIdf(List<List<String>> docs) {
+        ConcurrentHashMap<String, Double> idfMap = new ConcurrentHashMap<>();
+        int totalDocs = docs.size();
+
+        // 算频率
+        for (List<String> doc : docs) {
+            List<String> uniqueTerms = new ArrayList<>(doc);
+            uniqueTerms = uniqueTerms.stream().distinct().collect(Collectors.toList());
+            for (String term : uniqueTerms) {
+                idfMap.merge(term, 1.0, Double::sum);
+            }
+        }
+
+        // 算IDF值
+        for (String term : idfMap.keySet()) {
+            double idf = Math.log(totalDocs / idfMap.get(term));
+            idfMap.put(term, idf);
+        }
+
+        return idfMap;
+    }
+
+    private static double tfIdfCalculate(List<String> doc, List<List<String>> docs, String term, ConcurrentHashMap<String, Double> idfMap) {
+        double tf = tf(doc, term);
+        double idf = idfMap.getOrDefault(term, 0.0);
+        return tf * idf;
+    }
+
+    private static double round(double value, int places) {
+        if (places < 0) throw new IllegalArgumentException();
+        long factor = (long) Math.pow(10, places);
+        value = value * factor;
+        long tmp = Math.round(value);
+        return (double) tmp / factor;
+    }
+
+}
+
+
